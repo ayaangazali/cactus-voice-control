@@ -67,6 +67,8 @@ struct ModelDownloadView: View {
                 switch event {
                 case .progress(let p):
                     await MainActor.run { progress[model.id] = p }
+                case .extracting:
+                    await MainActor.run { statuses[model.id] = "extracting…" }
                 case .completed:
                     await MainActor.run {
                         progress[model.id] = 1.0

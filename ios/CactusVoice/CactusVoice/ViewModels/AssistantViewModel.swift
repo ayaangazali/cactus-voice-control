@@ -59,8 +59,8 @@ final class AssistantViewModel: ObservableObject {
         guard !modelsReady else { return }
         phase = .loadingModel
         do {
-            let whisperPath = ModelStorage.localURL(for: ModelCatalog.whisperBase).path
-            let llmPath = ModelStorage.localURL(for: activeLLM).path
+            let whisperPath = ModelStorage.modelDir(for: ModelCatalog.whisperBase).path
+            let llmPath = ModelStorage.modelDir(for: activeLLM).path
             try await whisperEngine.load(modelPath: whisperPath)
             try await llmEngine.load(modelPath: llmPath)
             modelsReady = true
@@ -74,7 +74,7 @@ final class AssistantViewModel: ObservableObject {
         activeLLM = model
         await llmEngine.unload()
         do {
-            try await llmEngine.load(modelPath: ModelStorage.localURL(for: model).path)
+            try await llmEngine.load(modelPath: ModelStorage.modelDir(for: model).path)
         } catch {
             phase = .failed("Swap failed: \(error.localizedDescription)")
         }

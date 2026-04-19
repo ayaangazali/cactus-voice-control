@@ -68,6 +68,8 @@ targets:
         embed: true
         codeSign: true
       - target: CactusVoiceWidget
+      - package: ZIPFoundation
+        product: ZIPFoundation
 
   CactusVoiceWidget:
     type: app-extension
@@ -117,3 +119,8 @@ schemes:
       config: Debug
     archive:
       config: Release
+
+packages:
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation
+    from: 0.9.19
