@@ -47,10 +47,6 @@ actor CactusEngine {
 
     init() {}
 
-    deinit {
-        if let h = modelHandle { cactusDestroy(h) }
-    }
-
     var isLoaded: Bool { modelHandle != nil }
     var loadedModelPath: String? { modelPath }
 
@@ -116,7 +112,27 @@ actor CactusEngine {
         guard let handle = modelHandle else { throw CactusEngineError.modelNotLoaded }
         let messagesJson = try Self.encodeMessages(messages)
         let optionsJson = try options.toJSONString()
-        return try cactusComplete(handle, messagesJson, optionsJson, nil, nil, nil)
+
+        let collector = TokenCollector()
+        _ = try cactusComplete(
+            handle, messagesJson, optionsJson, nil,
+            { token, _ in collector.append(token) },
+            nil
+        )
+        return collector.text
+    }
+
+    private final class TokenCollector: @unchecked Sendable {
+        private var buffer = ""
+        private let lock = NSLock()
+        func append(_ token: String) {
+            lock.lock(); defer { lock.unlock() }
+            buffer += token
+        }
+        var text: String {
+            lock.lock(); defer { lock.unlock() }
+            return buffer
+        }
     }
 
     func startStreamTranscribe(language: String = "en") throws {

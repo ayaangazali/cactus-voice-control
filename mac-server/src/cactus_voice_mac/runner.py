@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shlex
 from collections import deque
 from dataclasses import dataclass, field
@@ -26,6 +27,8 @@ class JobState:
 
 
 class Runner:
+    """Manages mobile-use subprocess lifecycle per intent."""
+
     def __init__(self, mobile_use_cmd: str, target_udid: str | None = None):
         self.mobile_use_cmd = mobile_use_cmd
         self.target_udid = target_udid or None
@@ -36,9 +39,21 @@ class Runner:
         argv = shlex.split(self.mobile_use_cmd) + [intent.instruction]
         if intent.output_description:
             argv += ["--output-description", intent.output_description]
-        if self.target_udid:
-            argv += ["--device", self.target_udid]
+        # mobile-use needs WebDriverAgent up to drive iOS Simulator/device.
+        # These flags spin up iproxy + WDA automatically on first run.
+        argv += ["--wda-auto-start-iproxy", "--wda-auto-start-wda"]
         return argv
+
+    def build_env(self) -> dict[str, str]:
+        """Build subprocess environment.
+
+        Forces unbuffered Python output so SSE consumers see status changes
+        promptly, and disables mobile-use's interactive telemetry prompt.
+        """
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        env.setdefault("MOBILE_USE_TELEMETRY_ENABLED", "false")
+        return env
 
     async def start(self, intent: CommandIntent) -> JobState:
         async with self._lock:
@@ -53,6 +68,7 @@ class Runner:
                 *argv,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                env=self.build_env(),
             )
         except FileNotFoundError as e:
             state.phase = Phase.FAILED
@@ -82,8 +98,7 @@ class Runner:
         if rc != 0:
             state.message = f"mobile-use exited with code {rc}"
         await self._notify(state)
-        for q in list(state.listeners):
-            await q.put(state.to_status())
+        # _notify already drains state.listeners; previous code looped a second time.
 
     async def cancel(self, job_id: UUID) -> bool:
         state = self.jobs.get(job_id)

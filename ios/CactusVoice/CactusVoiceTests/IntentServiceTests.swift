@@ -3,11 +3,24 @@ import XCTest
 
 final class IntentServiceTests: XCTestCase {
 
-    func testExtractJSONFromMessyOutput() {
-        let raw = "Sure! Here is the JSON:\n{\"instruction\":\"open mail\",\"output_description\":null,\"urgency\":\"normal\"}\nThanks."
+    func testPreprocessStripsThinkBlock() {
+        let input = "<think>I am thinking</think>{\"x\":1}"
+        let out = IntentService.preprocess(input)
+        XCTAssertFalse(out.contains("<think>"))
+        XCTAssertTrue(out.contains("{\"x\":1}"))
+    }
+
+    func testPreprocessStripsCodeFences() {
+        let input = "```json\n{\"a\":2}\n```"
+        let out = IntentService.preprocess(input)
+        XCTAssertFalse(out.contains("```"))
+        XCTAssertTrue(out.contains("\"a\":2"))
+    }
+
+    func testExtractJSONBalancedFirstObject() {
+        let raw = "lead {\"a\":{\"b\":1}} trail {\"c\":2}"
         let json = IntentService.extractJSON(from: raw)
-        XCTAssertTrue(json.hasPrefix("{"))
-        XCTAssertTrue(json.hasSuffix("}"))
+        XCTAssertEqual(json, "{\"a\":{\"b\":1}}")
     }
 
     func testExtractJSONOnPureJSON() {
@@ -15,7 +28,11 @@ final class IntentServiceTests: XCTestCase {
         XCTAssertEqual(IntentService.extractJSON(from: raw), raw)
     }
 
-    func testDecodeIntentFromValidJSON() throws {
+    func testExtractJSONReturnsTextWhenNoBraces() {
+        XCTAssertEqual(IntentService.extractJSON(from: "no json here"), "no json here")
+    }
+
+    func testDecodeIntentValid() throws {
         let json = "{\"instruction\":\"Open Gmail, list unread\",\"output_description\":\"JSON list\",\"urgency\":\"normal\"}"
         let intent = try IntentService.decodeIntent(json: json, transcript: "open gmail", modelId: "qwen3")
         XCTAssertEqual(intent.instruction, "Open Gmail, list unread")
@@ -32,7 +49,17 @@ final class IntentServiceTests: XCTestCase {
     }
 
     func testDecodeIntentRejectsInvalidJSON() {
-        let json = "not json at all"
+        XCTAssertThrowsError(try IntentService.decodeIntent(json: "not json", transcript: "x", modelId: "y"))
+    }
+
+    func testDecodeIntentRejectsEmptyInstruction() {
+        let json = "{\"instruction\":\"   \"}"
         XCTAssertThrowsError(try IntentService.decodeIntent(json: json, transcript: "x", modelId: "y"))
+    }
+
+    func testDecodeIntentTreatsEmptyOutputDescAsNil() throws {
+        let json = "{\"instruction\":\"x\",\"output_description\":\"   \"}"
+        let intent = try IntentService.decodeIntent(json: json, transcript: "x", modelId: "y")
+        XCTAssertNil(intent.outputDescription)
     }
 }

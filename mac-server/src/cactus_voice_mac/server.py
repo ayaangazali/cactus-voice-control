@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
 from .auth import verify_bearer
-from .models import CommandIntent
+from .models import CommandIntent, Phase
 from .runner import Runner
 
 log = logging.getLogger("cactus_voice_mac")
+
+TERMINAL_PHASES = {Phase.SUCCEEDED, Phase.FAILED, Phase.CANCELLED}
 
 
 def create_app(
@@ -28,7 +29,6 @@ def create_app(
     async def lifespan(app: FastAPI):
         log.info("cactus-voice-mac starting; mobile_use_cmd=%s", mobile_use_cmd)
         yield
-        # Cancel anything in flight
         for state in list(runner.jobs.values()):
             if state.process and state.process.returncode is None:
                 state.process.terminate()
@@ -48,8 +48,6 @@ def create_app(
     @app.get("/status/{job_id}")
     async def status_stream(job_id: str, _: bool = requires_auth):
         try:
-            from uuid import UUID
-
             uid = UUID(job_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="bad uuid")
@@ -57,15 +55,13 @@ def create_app(
         async def event_gen():
             async for status in runner.subscribe(uid):
                 yield {"data": status.model_dump_json()}
-                if status.phase in {"succeeded", "failed", "cancelled"}:
+                if status.phase in TERMINAL_PHASES:
                     return
 
         return EventSourceResponse(event_gen())
 
     @app.post("/cancel/{job_id}")
     async def cancel(job_id: str, _: bool = requires_auth):
-        from uuid import UUID
-
         try:
             uid = UUID(job_id)
         except ValueError:
@@ -88,14 +84,3 @@ def app_from_env() -> FastAPI:
     cmd = os.environ.get("MOBILE_USE_CMD", "uv run mobile-use")
     udid = os.environ.get("TARGET_UDID") or None
     return create_app(token=token, mobile_use_cmd=cmd, target_udid=udid)
-
-
-# uvicorn entry point
-app = None
-
-
-def lazy_app() -> FastAPI:
-    global app
-    if app is None:
-        app = app_from_env()
-    return app

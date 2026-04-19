@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 from uuid import UUID
@@ -21,6 +21,10 @@ class Phase(str, Enum):
     CANCELLED = "cancelled"
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class CommandIntent(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -30,7 +34,7 @@ class CommandIntent(BaseModel):
     urgency: Urgency = Urgency.NORMAL
     raw_transcript: str = Field(..., alias="raw_transcript")
     model_id: str = Field(..., alias="model_id")
-    created_at: datetime = Field(default_factory=datetime.utcnow, alias="created_at")
+    created_at: datetime = Field(default_factory=_utcnow, alias="created_at")
 
 
 class CommandStatus(BaseModel):

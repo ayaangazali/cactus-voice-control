@@ -24,24 +24,28 @@ final class IntentService {
     }
 
     private static let systemPrompt = """
-    You normalize a spoken transcript into a single JSON object that mobile-use can execute on an iOS Simulator.
+    /no_think
+    You convert a transcribed voice command into ONE JSON object that drives a phone-automation agent.
 
-    OUTPUT EXACTLY one JSON object, nothing else, no prose, no code fences:
-    {
-      "instruction": string,            // imperative sentence describing the task to perform on the phone
-      "output_description": string|null, // when user wants data extracted, describe shape; otherwise null
-      "urgency": "normal"|"urgent"
-    }
+    Rules:
+    - Output ONE JSON object only. No prose, no code fences, no <think> tags, no explanations.
+    - Always include all three keys.
+    - "instruction": a clear imperative sentence (start with verb).
+    - "output_description": a short shape description if user wants info extracted, else null.
+    - "urgency": "urgent" if user said urgent/emergency/now-now-now/asap, else "normal".
 
     Examples:
     USER: open gmail and tell me my unread emails
     {"instruction":"Open Gmail and list unread emails with sender and subject","output_description":"JSON list of {sender, subject}","urgency":"normal"}
 
     USER: text mom i'm running late
-    {"instruction":"Open Messages, find the conversation with Mom, send the message: I'm running late","output_description":null,"urgency":"normal"}
+    {"instruction":"Open Messages, find the conversation with Mom, send: I'm running late","output_description":null,"urgency":"normal"}
 
     USER: urgent uber to home now
-    {"instruction":"Open Uber, request a ride to Home","output_description":null,"urgency":"urgent"}
+    {"instruction":"Open Uber and request a ride to Home","output_description":null,"urgency":"urgent"}
+
+    USER: open the notes app
+    {"instruction":"Open the Notes app","output_description":null,"urgency":"normal"}
     """
 
     func intent(from transcript: String) async throws -> CommandIntent {
@@ -53,9 +57,9 @@ final class IntentService {
             CactusMessage(role: "user", content: trimmed)
         ]
         var opts = CactusCompletionOptions()
-        opts.maxTokens = 300
-        opts.temperature = 0.2
-        opts.stopSequences = ["\n\n"]
+        opts.maxTokens = 256
+        opts.temperature = 0.1
+        opts.stopSequences = []
 
         let raw: String
         do {
@@ -64,15 +68,42 @@ final class IntentService {
             throw IntentServiceError.llmFailed(error.localizedDescription)
         }
 
-        let json = Self.extractJSON(from: raw)
+        let cleaned = Self.preprocess(raw)
+        let json = Self.extractJSON(from: cleaned)
         return try Self.decodeIntent(json: json, transcript: trimmed, modelId: modelId)
     }
 
+    /// Strip Qwen3 <think>...</think> blocks and any markdown fences.
+    static func preprocess(_ text: String) -> String {
+        var t = text
+        while let start = t.range(of: "<think>"),
+              let end = t.range(of: "</think>", range: start.upperBound..<t.endIndex) {
+            t.removeSubrange(start.lowerBound..<end.upperBound)
+        }
+        // Strip ```json … ``` fences if present.
+        t = t.replacingOccurrences(of: "```json", with: "")
+             .replacingOccurrences(of: "```", with: "")
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Returns the most plausible JSON object substring. Picks the FIRST balanced
+    /// pair of `{...}` rather than greedily slicing first `{` to last `}` (which
+    /// breaks when the LLM emits nested or trailing content).
     static func extractJSON(from text: String) -> String {
-        if let start = text.firstIndex(of: "{"),
-           let end = text.lastIndex(of: "}"),
-           start < end {
-            return String(text[start...end])
+        var depth = 0
+        var startIdx: String.Index?
+        for idx in text.indices {
+            let c = text[idx]
+            if c == "{" {
+                if depth == 0 { startIdx = idx }
+                depth += 1
+            } else if c == "}" {
+                depth -= 1
+                if depth == 0, let s = startIdx {
+                    return String(text[s...idx])
+                }
+                if depth < 0 { depth = 0; startIdx = nil }
+            }
         }
         return text
     }
@@ -88,14 +119,21 @@ final class IntentService {
         }
         do {
             let p = try JSONDecoder().decode(Payload.self, from: data)
+            let instruction = p.instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !instruction.isEmpty else {
+                throw IntentServiceError.parseFailed("instruction empty")
+            }
             let urgency = CommandIntent.Urgency(rawValue: p.urgency ?? "normal") ?? .normal
+            let outputDesc = p.output_description?.trimmingCharacters(in: .whitespacesAndNewlines)
             return CommandIntent(
-                instruction: p.instruction,
-                outputDescription: p.output_description,
+                instruction: instruction,
+                outputDescription: (outputDesc?.isEmpty == false) ? outputDesc : nil,
                 urgency: urgency,
                 rawTranscript: transcript,
                 modelId: modelId
             )
+        } catch let e as IntentServiceError {
+            throw e
         } catch {
             throw IntentServiceError.parseFailed(error.localizedDescription)
         }

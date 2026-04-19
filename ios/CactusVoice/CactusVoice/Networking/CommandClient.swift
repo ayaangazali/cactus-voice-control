@@ -89,19 +89,15 @@ actor CommandClient {
                     guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
                         throw CommandClientError.http((resp as? HTTPURLResponse)?.statusCode ?? -1, "stream open failed")
                     }
-                    var buffer = ""
                     for try await line in bytes.lines {
-                        if line.hasPrefix("data:") {
-                            let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-                            buffer = payload
-                            if let data = buffer.data(using: .utf8),
-                               let status = try? JSONDecoder().decode(CommandStatus.self, from: data) {
-                                continuation.yield(status)
-                                if status.phase == .succeeded || status.phase == .failed || status.phase == .cancelled {
-                                    continuation.finish()
-                                    return
-                                }
-                            }
+                        guard line.hasPrefix("data:") else { continue } // ignore SSE comments + ping lines
+                        let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                        guard let data = payload.data(using: .utf8),
+                              let status = try? JSONDecoder().decode(CommandStatus.self, from: data) else { continue }
+                        continuation.yield(status)
+                        if status.phase == .succeeded || status.phase == .failed || status.phase == .cancelled {
+                            continuation.finish()
+                            return
                         }
                     }
                     continuation.finish()

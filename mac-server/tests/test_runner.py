@@ -44,11 +44,19 @@ def test_build_argv_with_output_description():
     assert "JSON list" in argv
 
 
-def test_build_argv_with_udid():
+def test_build_argv_includes_wda_flags():
+    r = Runner(mobile_use_cmd="echo")
+    argv = r.build_argv(make_intent())
+    assert "--wda-auto-start-iproxy" in argv
+    assert "--wda-auto-start-wda" in argv
+
+
+def test_build_argv_ignores_target_udid():
+    """mobile-use auto-detects via idb companion; udid hint is informational."""
     r = Runner(mobile_use_cmd="echo", target_udid="ABC-123")
     argv = r.build_argv(make_intent())
-    assert "--device" in argv
-    assert "ABC-123" in argv
+    assert "--device" not in argv
+    assert "ABC-123" not in argv
 
 
 def test_build_argv_splits_compound_command():
@@ -56,6 +64,18 @@ def test_build_argv_splits_compound_command():
     argv = r.build_argv(make_intent("x"))
     assert argv[:3] == ["uv", "run", "mobile-use"]
     assert "x" in argv
+
+
+def test_build_env_forces_unbuffered_python():
+    r = Runner(mobile_use_cmd="echo")
+    env = r.build_env()
+    assert env["PYTHONUNBUFFERED"] == "1"
+
+
+def test_build_env_disables_telemetry_default():
+    r = Runner(mobile_use_cmd="echo")
+    env = r.build_env()
+    assert env["MOBILE_USE_TELEMETRY_ENABLED"] == "false"
 
 
 @pytest.mark.asyncio
@@ -91,3 +111,12 @@ async def test_subscribe_yields_terminal_status():
         if status.phase in {Phase.SUCCEEDED, Phase.FAILED, Phase.CANCELLED}:
             break
     assert seen[-1] in {Phase.SUCCEEDED, Phase.FAILED}
+
+
+@pytest.mark.asyncio
+async def test_duplicate_intent_id_returns_existing():
+    r = Runner(mobile_use_cmd="echo")
+    intent = make_intent("dup")
+    s1 = await r.start(intent)
+    s2 = await r.start(intent)
+    assert s1 is s2

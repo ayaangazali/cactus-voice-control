@@ -9,9 +9,9 @@ enum TranscribeEvent: Equatable {
 }
 
 struct VADConfig {
-    var rmsThreshold: Float = 0.012
-    var hangoverMillis: Int = 800
-    var minSpeechMillis: Int = 300
+    var rmsThreshold: Float = 0.025
+    var hangoverMillis: Int = 1000
+    var minSpeechMillis: Int = 400
 }
 
 @MainActor
@@ -25,6 +25,7 @@ final class TranscribeService: NSObject {
     private var hasSpeechStarted = false
     private var lastSpeechAt: Date = .distantPast
     private var firstSpeechAt: Date = .distantPast
+    private var silenceFired = false
     private var pcmBuffer = Data()
     private let chunkBytes: Int
 
@@ -39,7 +40,13 @@ final class TranscribeService: NSObject {
         try await cactus.startStreamTranscribe(language: "en")
 
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .allowBluetooth])
+        let opts: AVAudioSession.CategoryOptions
+        if #available(iOS 14.5, *) {
+            opts = [.duckOthers, .allowBluetoothHFP, .defaultToSpeaker]
+        } else {
+            opts = [.duckOthers, .allowBluetooth, .defaultToSpeaker]
+        }
+        try session.setCategory(.playAndRecord, mode: .voiceChat, options: opts)
         try session.setPreferredSampleRate(targetSampleRate)
         try session.setPreferredIOBufferDuration(0.02)
         try session.setActive(true, options: .notifyOthersOnDeactivation)
@@ -52,16 +59,20 @@ final class TranscribeService: NSObject {
             channels: 1,
             interleaved: true
         ) else {
-            throw NSError(domain: "TranscribeService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Cannot create target format"])
+            throw NSError(domain: "TranscribeService", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "Cannot create target format"])
         }
         guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-            throw NSError(domain: "TranscribeService", code: -2, userInfo: [NSLocalizedDescriptionKey: "Cannot create converter"])
+            throw NSError(domain: "TranscribeService", code: -2,
+                          userInfo: [NSLocalizedDescriptionKey: "Cannot create converter"])
         }
 
         return AsyncStream { cont in
             self.continuation = cont
             self.hasSpeechStarted = false
+            self.silenceFired = false
             self.lastSpeechAt = .distantPast
+            self.firstSpeechAt = .distantPast
             self.pcmBuffer.removeAll(keepingCapacity: true)
 
             let bufferSize: AVAudioFrameCount = 4096
@@ -99,17 +110,18 @@ final class TranscribeService: NSObject {
 
     private nonisolated func handleInput(buffer: AVAudioPCMBuffer, converter: AVAudioConverter, target: AVAudioFormat) {
         let frameCapacity = AVAudioFrameCount(target.sampleRate * Double(buffer.frameLength) / buffer.format.sampleRate)
-        guard let outBuffer = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: frameCapacity) else { return }
+        guard frameCapacity > 0,
+              let outBuffer = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: frameCapacity)
+        else { return }
         outBuffer.frameLength = frameCapacity
 
         var error: NSError?
-        var feed = false
+        let supplied = AtomicFlag()
         let _ = converter.convert(to: outBuffer, error: &error) { _, status in
-            if feed {
+            if supplied.swap() {
                 status.pointee = .noDataNow
                 return nil
             }
-            feed = true
             status.pointee = .haveData
             return buffer
         }
@@ -117,9 +129,10 @@ final class TranscribeService: NSObject {
 
         guard let int16 = outBuffer.int16ChannelData?[0] else { return }
         let frames = Int(outBuffer.frameLength)
+        guard frames > 0 else { return }
         let data = Data(bytes: int16, count: frames * MemoryLayout<Int16>.size)
-
         let rms = Self.rms(int16Pointer: int16, count: frames)
+
         Task { @MainActor in
             self.consume(pcm: data, rms: rms)
         }
@@ -159,11 +172,11 @@ final class TranscribeService: NSObject {
 
         let speechDuration = now.timeIntervalSince(firstSpeechAt) * 1000
         let silenceDuration = now.timeIntervalSince(lastSpeechAt) * 1000
-        if hasSpeechStarted,
+        if hasSpeechStarted, !silenceFired,
            speechDuration > Double(vad.minSpeechMillis),
            silenceDuration > Double(vad.hangoverMillis) {
+            silenceFired = true
             continuation?.yield(.silenceDetected)
-            hasSpeechStarted = false
         }
     }
 
@@ -173,5 +186,16 @@ final class TranscribeService: NSObject {
 
     nonisolated static func vadFires(rms: Float, config: VADConfig) -> Bool {
         rms >= config.rmsThreshold
+    }
+}
+
+private final class AtomicFlag: @unchecked Sendable {
+    private var value = false
+    private let lock = NSLock()
+    func swap() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let old = value
+        value = true
+        return old
     }
 }

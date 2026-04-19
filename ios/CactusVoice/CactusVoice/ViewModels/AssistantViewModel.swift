@@ -32,13 +32,12 @@ final class AssistantViewModel: ObservableObject {
     private var transcribeTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
     private var liveActivity: Activity<ListeningAttributes>?
+    private var liveActivityEndTask: Task<Void, Never>?
 
     init() {
         self.pairedMac = PairingStore.load()
         observeNotifications()
     }
-
-    // MARK: - Observation
 
     private func observeNotifications() {
         NotificationCenter.default.addObserver(
@@ -71,11 +70,17 @@ final class AssistantViewModel: ObservableObject {
     }
 
     func swapLLM(to model: ModelEntry) async {
+        guard model != activeLLM else { return }
+        let previous = activeLLM
         activeLLM = model
         await llmEngine.unload()
         do {
             try await llmEngine.load(modelPath: ModelStorage.modelDir(for: model).path)
+            phase = .idle
         } catch {
+            // Roll back to previous model on failure so user is not stuck.
+            activeLLM = previous
+            try? await llmEngine.load(modelPath: ModelStorage.modelDir(for: previous).path)
             phase = .failed("Swap failed: \(error.localizedDescription)")
         }
     }
@@ -89,6 +94,13 @@ final class AssistantViewModel: ObservableObject {
     // MARK: - Pipeline
 
     func startListening() async {
+        // Idempotent: if already in flight, ignore.
+        switch phase {
+        case .idle, .succeeded, .failed:
+            break
+        default:
+            return
+        }
         guard pairedMac != nil else {
             phase = .failed("Pair a Mac in Settings first.")
             return
@@ -100,6 +112,8 @@ final class AssistantViewModel: ObservableObject {
         finalTranscript = ""
         lastIntent = nil
         lastStatus = nil
+        liveActivityEndTask?.cancel()
+        await endLiveActivity() // clean any leftover from prior session
         phase = .listening
         await startLiveActivity()
 
@@ -188,12 +202,12 @@ final class AssistantViewModel: ObservableObject {
                     if status.phase == .succeeded {
                         await MainActor.run { self.phase = .succeeded }
                         await self.updateLiveActivity(.succeeded, preview: intent.instruction, result: status.result)
-                        await self.endLiveActivityAfter(seconds: 8)
+                        await self.scheduleLiveActivityEnd(seconds: 8)
                         return
                     } else if status.phase == .failed || status.phase == .cancelled {
                         await MainActor.run { self.phase = .failed(status.message ?? "failed") }
                         await self.updateLiveActivity(.failed, preview: status.message ?? "failed")
-                        await self.endLiveActivityAfter(seconds: 8)
+                        await self.scheduleLiveActivityEnd(seconds: 8)
                         return
                     }
                 }
@@ -217,7 +231,7 @@ final class AssistantViewModel: ObservableObject {
                 pushType: nil
             )
         } catch {
-            // Activity unavailable; ignore
+            // Activity unavailable; ignore.
         }
     }
 
@@ -228,14 +242,20 @@ final class AssistantViewModel: ObservableObject {
     }
 
     private func endLiveActivity() async {
+        liveActivityEndTask?.cancel()
+        liveActivityEndTask = nil
         guard let activity = liveActivity else { return }
         let final = ListeningAttributes.ContentState(phase: .succeeded, preview: "")
         await activity.end(.init(state: final, staleDate: nil), dismissalPolicy: .immediate)
         liveActivity = nil
     }
 
-    private func endLiveActivityAfter(seconds: TimeInterval) async {
-        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-        await endLiveActivity()
+    private func scheduleLiveActivityEnd(seconds: TimeInterval) async {
+        liveActivityEndTask?.cancel()
+        liveActivityEndTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            if Task.isCancelled { return }
+            await self?.endLiveActivity()
+        }
     }
 }
