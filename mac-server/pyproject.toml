@@ -1,0 +1,45 @@
+[project]
+name = "cactus-voice-mac"
+version = "0.1.0"
+description = "Mac gateway: receive voice intents from iPhone Cactus app and run mobile-use against the iOS Simulator"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Ayaan Gazali" }]
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+    "zeroconf>=0.132",
+    "qrcode>=7.4",
+    "rich>=13.7",
+    "typer>=0.12",
+    "sse-starlette>=2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+cactus-voice-mac = "cactus_voice_mac.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cactus_voice_mac"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
