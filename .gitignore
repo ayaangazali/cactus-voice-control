@@ -1,0 +1,74 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Xcode
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+xcuserdata/
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.perspectivev3
+!default.perspectivev3
+
+# XcodeGen produces project; project.yml is source of truth, generated project is ignored
+ios/CactusVoice/CactusVoice.xcodeproj/
+
+# Vendored Cactus framework (fetched via scripts/fetch_cactus.sh)
+ios/CactusVoice/CactusVoice/Cactus/cactus-ios.xcframework/
+ios/CactusVoice/CactusVoice/Cactus/Cactus.swift
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# CocoaPods / Carthage (defensive)
+Pods/
+Carthage/Build
+
+# Models (downloaded at runtime to device Documents)
+*.gguf
+
+# Python (mac-server)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+
+# Env / secrets
+.env
+.env.local
+*.pem
+*.key
+secrets/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+.cursor/
