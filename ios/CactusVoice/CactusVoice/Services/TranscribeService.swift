@@ -125,7 +125,7 @@ final class TranscribeService: NSObject {
         }
     }
 
-    private static func rms(int16Pointer: UnsafePointer<Int16>, count: Int) -> Float {
+    nonisolated private static func rms(int16Pointer: UnsafePointer<Int16>, count: Int) -> Float {
         guard count > 0 else { return 0 }
         var sum: Double = 0
         for i in 0..<count {
@@ -171,7 +171,7 @@ final class TranscribeService: NSObject {
         continuation?.yield(event)
     }
 
-    static func vadFires(rms: Float, config: VADConfig) -> Bool {
+    nonisolated static func vadFires(rms: Float, config: VADConfig) -> Bool {
         rms >= config.rmsThreshold
     }
 }
