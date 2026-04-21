@@ -1,4 +1,4 @@
-# Cactus Voice Control
+# Wooly
 
 Hold Action Button on iPhone 15 Pro+ → speak → Mac drives iOS Simulator with [`mobile-use`](https://github.com/minitap-ai/mobile-use).
 
