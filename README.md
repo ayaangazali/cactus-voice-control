@@ -53,6 +53,4 @@ Bind the **Start Cactus listening** Shortcut to the Action Button:
 
 Greenfield. iOS code targets a buildable XcodeGen project; physical-device verification (Action Button, mic, Live Activity) requires deploy to iPhone 15 Pro+. Mac server has pytest coverage for auth + runner subprocess wiring.
 
-## License
 
-MIT — see [`LICENSE`](LICENSE).
